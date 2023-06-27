@@ -10,11 +10,19 @@ css = "style.css"
 script_path = "scripts"
 _gradio_template_response_orig = gr.routes.templates.TemplateResponse
 
+def gr_show(visible=True):
+    return {"visible": visible, "__type__": "update"}
 
 def predict(ctx, query, max_length, top_p, temperature, use_stream_chat):
     ctx.limit_round()
     ctx.limit_word()
-    flag = True
+
+    ctx.inferBegin()
+    token = 0
+    ctx_round = ctx.get_round()
+    ctx_word = ctx.get_word()
+    yield ctx.rh, "正在生成回复内容...", f"总对话轮数: {ctx_round}\n总对话字数: {ctx_word}\nToken 数: {token}"
+
     for _, output in infer(
             query=query,
             history=ctx.history,
@@ -23,46 +31,38 @@ def predict(ctx, query, max_length, top_p, temperature, use_stream_chat):
             temperature=temperature,
             use_stream_chat=use_stream_chat
     ):
-        if flag:
-            ctx.append(query, output)
-            flag = False
-        else:
-            ctx.update_last(query, output)
-        yield ctx.rh, ""
-    ctx.refresh_last()
-    yield ctx.rh, ""
+        if ctx.inferLoop(query, output):
+            print("")
+            break
+
+        token += 1
+        yield ctx.rh, gr_show(), f"总对话轮数: {ctx_round}\n总对话字数: {ctx_word}\nToken 数: {token}"
+
+    ctx.inferEnd()
+    yield ctx.rh, "", f"总对话轮数: {ctx.get_round()}\n总对话字数: {ctx.get_word()}\n上次回复 Token 数: {token}"
 
 def regenerate(ctx, max_length, top_p, temperature, use_stream_chat):
-    if ctx.history and ctx.rh:
-        query = ctx.history[-1][0]
-        ctx.revoke()
-        ctx.limit_round()
-        ctx.limit_word()
-        flag = True
-        for _, output in infer(
-                query=query,
-                history=ctx.history,
-                max_length=max_length,
-                top_p=top_p,
-                temperature=temperature,
-                use_stream_chat=use_stream_chat
-        ):
-            if flag:
-                ctx.append(query, output)
-                flag = False
-            else:
-                ctx.update_last(query, output)
-            yield ctx.rh, ""
-        ctx.refresh_last()
-        yield ctx.rh, ""
+    if not ctx.rh:
+        print('*' * 50)
+        raise RuntimeWarning("没有过去的对话")
+    
+    query, output = ctx.rh.pop()
+    ctx.history.pop()
+
+    for p0, p1, p2 in predict(ctx, query, max_length, top_p, temperature, use_stream_chat):
+        yield p0, p1, p2
 
 def clear_history(ctx):
     ctx.clear()
-    return gr.update(value=[])
+    return gr.update(value=[]), "已清空对话"
 
 def edit_history(ctx, log, idx):
     if log == '':
         return ctx.rh, {'visible': True, '__type__': 'update'},  {'value': ctx.history[idx[0]][idx[1]], '__type__': 'update'}, idx
+    print('+' * 50)
+    print(ctx.history[idx[0]][idx[1]])
+    print("----->")
+    print(log)
     ctx.edit_history(log, idx[0], idx[1])
     return ctx.rh, *gr_hide()
 
@@ -96,17 +96,17 @@ def create_ui():
                 with gr.Row():
                     with gr.Column(variant="panel"):
                         with gr.Row():
-                            max_length = gr.Slider(minimum=4, maximum=4096, step=4, label='Max Length', value=2048)
-                            top_p = gr.Slider(minimum=0.01, maximum=1.0, step=0.01, label='Top P', value=0.7)
+                            max_length = gr.Slider(minimum=32, maximum=32768, step=32, label='Max Length', value=8192)
+                            top_p = gr.Slider(minimum=0.01, maximum=1.0, step=0.01, label='Top P', value=0.8)
                         with gr.Row():
                             temperature = gr.Slider(minimum=0.01, maximum=1.0, step=0.01, label='Temperature', value=0.95)
 
                         with gr.Row():
-                            max_rounds = gr.Slider(minimum=1, maximum=100, step=1, label="最大对话轮数", value=20)
+                            max_rounds = gr.Slider(minimum=1, maximum=100, step=1, label="最大对话轮数", value=25)
                             apply_max_rounds = gr.Button("✔", elem_id="del-btn")
 
                         with gr.Row():
-                            max_words = gr.Slider(minimum=4, maximum=4096, step=4, label='最大对话字数', value=2048)
+                            max_words = gr.Slider(minimum=32, maximum=32768, step=32, label='最大对话字数', value=8192)
                             apply_max_words = gr.Button("✔", elem_id="del-btn")
 
                         cmd_output = gr.Textbox(label="消息输出")
@@ -145,6 +145,7 @@ def create_ui():
                 with gr.Row():
                     input_message = gr.Textbox(placeholder="输入你的内容...(按 Ctrl+Enter 发送)", show_label=False, lines=4, elem_id="chat-input").style(container=False)
                     clear_input = gr.Button("🗑️", elem_id="del-btn")
+                    stop_generate = gr.Button("❌", elem_id="del-btn")
 
                 with gr.Row():
                     submit = gr.Button("发送", elem_id="c_generate")
@@ -164,7 +165,8 @@ def create_ui():
             use_stream_chat
         ], outputs=[
             chatbot,
-            input_message
+            input_message,
+            cmd_output
         ])
 
         regenerate_btn.click(regenerate, inputs=[
@@ -175,10 +177,13 @@ def create_ui():
             use_stream_chat
         ], outputs=[
             chatbot,
-            input_message
+            input_message,
+            cmd_output
         ])
+        
         revoke_btn.click(lambda ctx: ctx.revoke(), inputs=[state], outputs=[chatbot])
-        clear_history_btn.click(clear_history, inputs=[state], outputs=[chatbot])
+        clear_history_btn.click(clear_history, inputs=[state], outputs=[chatbot, cmd_output])
+        stop_generate.click(lambda ctx: ctx.interrupt(), inputs=[state], outputs=[])
         clear_input.click(lambda x: "", inputs=[input_message], outputs=[input_message])
         save_his_btn.click(lambda ctx: ctx.save_history(), inputs=[state], outputs=[cmd_output])
         save_md_btn.click(lambda ctx: ctx.save_as_md(), inputs=[state], outputs=[cmd_output])
@@ -192,7 +197,7 @@ def create_ui():
 
     with gr.Blocks(css=css, analytics_enabled=False) as settings_interface:
         with gr.Row():
-            reload_ui = gr.Button("Reload UI")
+            reload_ui = gr.Button("重启 WebUI")
 
         def restart_ui():
             options.need_restart = True
@@ -200,8 +205,8 @@ def create_ui():
         reload_ui.click(restart_ui)
 
     interfaces = [
-        (chat_interface, "Chat", "chat"),
-        (settings_interface, "Settings", "settings")
+        (chat_interface, "聊天", "chat"),
+        (settings_interface, "设置", "settings")
     ]
 
     with gr.Blocks(css=css, analytics_enabled=False, title="ChatGLM") as demo:

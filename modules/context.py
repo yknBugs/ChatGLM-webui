@@ -17,6 +17,10 @@ def parse_codeblock(text):
                 lines[i] = "<br/>" + line.replace("<", "&lt;").replace(">", "&gt;")
     return "".join(lines)
 
+STOPPED = 0
+LOOP_FIRST = 1
+LOOP = 2
+INTERRUPTED = 3
 
 class Context:
     def __init__(self, history: Optional[List[Tuple[str, str]]] = None):
@@ -25,24 +29,46 @@ class Context:
         else:
             self.history = []
         self.rh = []
-        self.max_rounds = 20
-        self.max_words = 2048
+        self.state = STOPPED
+        self.max_rounds = 25
+        self.max_words = 8192
 
-    def append(self, query, output) -> str:
+    def inferBegin(self):
+        self.state = LOOP_FIRST
+
+        hl = len(self.history)
+        if hl == 0:
+            return
+        elif hl == self.max_rounds:
+            self.history.pop(0)
+            self.rh.pop(0)
+        elif hl > self.max_rounds:
+            self.history = self.history[-self.max_rounds:]
+            self.rh = self.rh[-self.max_rounds:]
+
+    def interrupt(self):
+        if self.state == LOOP_FIRST or self.state == LOOP:
+            self.state = INTERRUPTED
+
+    def inferLoop(self, query, output) -> bool:
         # c: List[Tuple[str, str]]
-        ok = parse_codeblock(output)
-        self.history.append((query, output))
-        self.rh.append((query, ok))
-        return ok
+        if self.state == INTERRUPTED:
+            return True
+        elif self.state == LOOP_FIRST:
+            self.history.append((query, output))
+            self.rh.append((query, parse_codeblock(output)))
+            self.state = LOOP
+        else:
+            self.history[-1] = (query, output)
+            self.rh[-1] = (query, output)
 
-    def update_last(self, query, output) -> None:
-        self.history[-1] = (query, output)
-        self.rh[-1] = (query, output)
+        return False
 
-    def refresh_last(self) -> None:
+    def inferEnd(self) -> None:
         if self.rh:
             query, output = self.rh[-1]
             self.rh[-1] = (query, parse_codeblock(output))
+        self.state = STOPPED
 
     def clear(self) -> None:
         self.history = []
@@ -77,13 +103,22 @@ class Context:
             for i, (old_query, response) in enumerate(self.history):
                 prompt += "[Round {}]\n问：{}\n答：{}\n".format(i, old_query, response)
 
+    def get_round(self) -> int:
+        return len(self.history)
+
+    def get_word(self) -> int:
+        prompt = ""
+        for i, (old_query, response) in enumerate(self.history):
+            prompt += "[Round {}]\n问：{}\n答：{}\n".format(i, old_query, response)
+        return len(prompt)
+
     def save_history(self):
         s = [{"q": i[0], "o": i[1]} for i in self.history]
         filename = f"history-{int(time.time())}.json"
         p = os.path.join("outputs", "save", filename)
         with open(p, "w", encoding="utf-8") as f:
             f.write(json.dumps(s, ensure_ascii=False))
-        return f"Successful saved to: {p}"
+        return f"成功保存至: {p}"
 
     def save_as_md(self):
         filename = f"history-{int(time.time())}.md"
@@ -93,7 +128,7 @@ class Context:
             output += f"# 我: {i[0]}\n\nChatGLM: {i[1]}\n\n"
         with open(p, "w", encoding="utf-8") as f:
             f.write(output)
-        return f"Successful saved to: {p}"
+        return f"成功保存至: {p}"
 
     def load_history(self, file):
         try:
