@@ -55,6 +55,8 @@ def regenerate(ctx, max_length, top_p, temperature, use_stream_chat):
         yield p0, p1, p2
 
 def bilisummary_generate(b_message, b_cookies, max_length, top_p, temperature, use_stream_chat):
+    print('-' * 50)
+    print(str(b_message))
     styled_history = []
     BTR = BilibiliTranscriptReader()
     data, pic, bvid = BTR.load_data(video_urls=b_message, cookies=b_cookies)
