@@ -3,6 +3,8 @@ import os
 import gradio as gr
 
 from modules import options
+from modules.bilibili_utils import BilibiliTranscriptReader
+from modules.context import parse_codeblock
 from modules.context import Context
 from modules.model import infer
 
@@ -51,6 +53,30 @@ def regenerate(ctx, max_length, top_p, temperature, use_stream_chat):
 
     for p0, p1, p2 in predict(ctx, query, max_length, top_p, temperature, use_stream_chat):
         yield p0, p1, p2
+
+def bilisummary_generate(b_message, b_cookies, max_length, top_p, temperature, use_stream_chat):
+    styled_history = []
+    BTR = BilibiliTranscriptReader()
+    data, pic, bvid = BTR.load_data(video_urls=b_message, cookies=b_cookies)
+    styled_history.append((b_message, ""))
+    if pic:
+        b_message = """<a href="https://www.bilibili.com/video/BV{bvid}"><img src="{pic}" alt="" width="226" height="144" /></a>"""
+    if data != "":
+        for _, output in infer(
+            query=data,
+            history=[],
+            max_length=max_length,
+            top_p=top_p,
+            temperature=temperature,
+            use_stream_chat=use_stream_chat
+        ):
+            styled_history[-1] = (b_message, output)
+            yield styled_history, ''
+
+    else:
+        output = "不支持该视频"
+    styled_history[-1] = (b_message, output)
+    yield styled_history, ''
 
 def clear_history(ctx):
     ctx.clear()
@@ -204,9 +230,42 @@ def create_ui():
 
         reload_ui.click(restart_ui)
 
+    with gr.Blocks(css=css, analytics_enabled=False) as bilisummary_interface:
+        with gr.Row():
+            gr.Markdown('''<h1><center>ChatGLM 哔哩哔哩视频总结</center></h1>''')
+        
+        with gr.Row():
+            b_summary = gr.Chatbot(elem_id="chat-box", show_label=False).style(height=300)
+
+        with gr.Row():
+            b_message = gr.Textbox(label='请输入 BV 号 (或 AV 号):')
+            b_clear_message = gr.Button("🗑️", elem_id="del-btn")
+
+        with gr.Row():
+            b_generate = gr.Button('提交')
+
+        with gr.Row():
+            with gr.Accordion("设置"):
+                b_cookies = gr.Textbox(label='请输入 B 站 Cookie (在 F12 - Network 的记录中):')
+
+        b_generate.click(bilisummary_generate, inputs=[
+            b_message,
+            b_cookies,
+            max_length,
+            top_p,
+            temperature,
+            use_stream_chat
+        ], outputs=[
+            b_summary,
+            b_message
+        ])
+
+        b_clear_message.click(lambda x: "", inputs=[b_message], outputs=[b_message])
+
     interfaces = [
         (chat_interface, "聊天", "chat"),
-        (settings_interface, "设置", "settings")
+        (settings_interface, "设置", "settings"),
+        (bilisummary_interface, "B站视频总结", "bilisummary")
     ]
 
     with gr.Blocks(css=css, analytics_enabled=False, title="ChatGLM") as demo:
