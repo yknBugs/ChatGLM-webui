@@ -10,7 +10,7 @@ DEFAULT_SUMMARY_PROMPT_TMPL = (
     "{}\n"
     "\n"
     "\n"
-    "摘要：\n"
+    "摘要："
     )
 
 headers = {
@@ -58,7 +58,7 @@ class BilibiliTranscriptReader():
             except Exception as e:
                 print('*' * 50)
                 print(f"无法加载网页链接: {repr(e)}")
-                return ""
+                return "", pic, bvid
 
         # 发送GET请求，获取网页HTML源码
         try:
@@ -67,7 +67,7 @@ class BilibiliTranscriptReader():
         except Exception as e:
             print('*' * 50)
             print(f"下载网页源码失败: {repr(e)}")
-            return ""
+            return "", pic, bvid
 
         # 使用BeautifulSoup库解析HTML源码
         try:
@@ -89,21 +89,25 @@ class BilibiliTranscriptReader():
         except Exception as e:
             print('*' * 50)
             print(f"提取网页信息失败: {repr(e)}")
-            return ""
+            return "", pic, bvid
 
         # 提取视频字幕
-        sub_list = get_subtitle_list(cookies, bvid, aid)
-        if sub_list and len(sub_list) > 0:
-            sub_url = sub_list[0]["subtitle_url"]
-            result = requests.get("https:" + sub_url)
-            raw_sub_titles = json.loads(result.content)["body"]
-            raw_transcript = " ".join([c["content"] for c in raw_sub_titles])
-            # Add basic video info to transcript
-            raw_transcript_with_meta_info = f"<视频标题> {title}\n<视频简介> {desc}\n<字幕内容> {raw_transcript}"
-            return raw_transcript_with_meta_info, pic, bvid
-        else:
-            raw_transcript = ""
-            return raw_transcript, pic, bvid
+        try:
+            sub_list = get_subtitle_list(cookies, bvid, aid)
+            if sub_list and len(sub_list) > 0:
+                sub_url = sub_list[0]["subtitle_url"]
+                result = requests.get("https:" + sub_url)
+                raw_sub_titles = json.loads(result.content)["body"]
+                raw_transcript = " ".join([c["content"] for c in raw_sub_titles])
+                # Add basic video info to transcript
+                raw_transcript_with_meta_info = f"<视频标题> {title}\n<视频简介> {desc}\n<字幕内容> {raw_transcript}"
+                return raw_transcript_with_meta_info, pic, bvid
+            else:
+                raise RuntimeError("目标视频没有字幕")
+        except Exception as e:
+            print('*' * 50)
+            print(f"提取字幕时出现错误: {repr(e)}")
+            return "", pic, bvid
 
     def load_data(self, video_urls: str, cookies: str, **load_kwargs: Any) -> str:
         results = ""
