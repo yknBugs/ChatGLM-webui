@@ -7,3 +7,4 @@ gradio
 mdtex2html
 sentencepiece
 accelerate
+bilibili_api
