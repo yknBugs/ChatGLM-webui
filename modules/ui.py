@@ -133,17 +133,17 @@ def create_ui():
                             gr.Markdown('''说明:<br/>`Max Length` 生成文本时的长度限制<br/>`Top P` 控制输出文本中概率最高前 p 个单词的总概率<br/>`Temperature` 控制生成文本的多样性和随机性<br/>`Top P` 变小会生成更多样和不相关的文本；变大会生成更保守和相关的文本。<br/>`Temperature` 变小会生成更保守和相关的文本；变大会生成更奇特和不相关的文本。<br/>`最大对话轮数` 对话记忆轮数<br/>`最大对话字数` 对话记忆字数<br/>限制记忆可减小显存占用。<br/>点击对话可直接修改对话内容''')
 
             with gr.Column(scale=7):
-                chatbot = gr.Chatbot(elem_id="chat-box", show_label=False).style(height=800)
+                chatbot = gr.Chatbot(elem_id="chat-box", show_label=False, height=800)
                 with gr.Row(visible=False) as edit_log:
                     with gr.Column():
-                        log = gr.Textbox(placeholder="输入你修改后的内容", show_label=False, lines=4, elem_id="chat-input").style(container=False)
+                        log = gr.Textbox(placeholder="输入你修改后的内容", show_label=False, lines=4, elem_id="chat-input", container=False)
                         with gr.Row():
                             submit_log = gr.Button('保存')
                             cancel_log = gr.Button('取消')
                 log_idx = gr.State([])
 
                 with gr.Row():
-                    input_message = gr.Textbox(placeholder="输入你的内容...(按 Ctrl+Enter 发送)", show_label=False, lines=4, elem_id="chat-input").style(container=False)
+                    input_message = gr.Textbox(placeholder="输入你的内容...(按 Ctrl+Enter 发送)", show_label=False, lines=4, elem_id="chat-input", container=False)
                     clear_input = gr.Button("🗑️", elem_id="del-btn")
                     stop_generate = gr.Button("❌", elem_id="del-btn")
 
