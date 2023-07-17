@@ -136,7 +136,7 @@ def create_ui():
                 chatbot = gr.Chatbot(elem_id="chat-box", show_label=False, height=800)
                 with gr.Row(visible=False) as edit_log:
                     with gr.Column():
-                        log = gr.Textbox(placeholder="输入你修改后的内容", show_label=False, lines=4, elem_id="chat-input", container=False)
+                        log = gr.Textbox(placeholder="输入你修改后的内容", lines=4, elem_id="chat-input", container=False)
                         with gr.Row():
                             submit_log = gr.Button('保存')
                             cancel_log = gr.Button('取消')
