@@ -21,7 +21,7 @@ def prepare_model():
     else:
         if cmd_opts.precision is None:
             total_vram_in_gb = get_device_properties(0).total_memory / 1e9
-            print(f'GPU memory: {total_vram_in_gb:.2f} GB')
+            print(f'显存: {total_vram_in_gb:.2f} GB')
 
             if total_vram_in_gb > 30:
                 cmd_opts.precision = 'fp32'
@@ -32,9 +32,9 @@ def prepare_model():
             else:
                 cmd_opts.precision = 'int4'
 
-            print(f'Choosing precision {cmd_opts.precision} according to your VRAM.'
-                  f' If you want to decide precision yourself,'
-                  f' please add argument --precision when launching the application.')
+            print(f'根据你的显存容量，自动选择了精度 {cmd_opts.precision}'
+                  f' 如果你需要自己选择精度，'
+                  f' 请在启动时传入参数 --precision 来选择精度')
 
         if cmd_opts.precision == "fp16":
             model = model.half().cuda()
@@ -52,12 +52,29 @@ def load_model():
     if cmd_opts.ui_dev:
         return
 
-    from transformers import AutoModel, AutoTokenizer
+    from transformers import AutoConfig, AutoModel, AutoTokenizer
+    import os
+    import torch
 
     global tokenizer, model
 
+    # Load pretrained model and tokenizer
+    config = AutoConfig.from_pretrained(cmd_opts.model_path, trust_remote_code=True)
+    config.pre_seq_len = cmd_opts.pre_seq_len
+    config.prefix_projection = cmd_opts.prefix_projection
+
     tokenizer = AutoTokenizer.from_pretrained(cmd_opts.model_path, trust_remote_code=True)
-    model = AutoModel.from_pretrained(cmd_opts.model_path, trust_remote_code=True)
+    model = AutoModel.from_pretrained(cmd_opts.model_path, config=config, trust_remote_code=True)
+
+    if cmd_opts.ptuning_checkpoint is not None:
+        # Load ptuning weights
+        prefix_state_dict = torch.load(os.path.join(cmd_opts.ptuning_checkpoint, "pytorch_model.bin"))
+        new_prefix_state_dict = {}
+        for k, v in prefix_state_dict.items():
+            if k.startswith("transformer.prefix_encoder."):
+                new_prefix_state_dict[k[len("transformer.prefix_encoder."):]] = v
+
+        model.transformer.prefix_encoder.load_state_dict(new_prefix_state_dict)
     prepare_model()
 
 
@@ -65,20 +82,22 @@ def infer(query,
           history: Optional[List[Tuple]],
           max_length, top_p, temperature, use_stream_chat: bool):
     if cmd_opts.ui_dev:
-        yield "hello", "hello, dev mode!"
-        return
+        import time
+        while True:
+          yield query, "hello, dev mode %s" % time.ctime()
+          time.sleep(1)
 
     if not model:
-        raise "Model not loaded"
+        raise "模型未加载"
 
     if history is None:
         history = []
 
     output_pos = 0
     try:
-        print("---------------------------------------------------------------")
+        print('-' * 50)
         print(str(query))
-        print("===============================================================")
+        print('=' * 50)
         if use_stream_chat:
             for output, history in model.stream_chat(
                     tokenizer, query=query, history=history,
@@ -103,9 +122,8 @@ def infer(query,
 
     except Exception as e:
         print("")
-        print("***************************************************************")
-        print(f"Generation failed: {repr(e)}", end='')
+        print('*' * 50)
+        print(f"生成失败: {repr(e)}", end='')
 
     print()
     torch_gc()
-
