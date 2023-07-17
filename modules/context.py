@@ -1,7 +1,9 @@
-from typing import Optional, List, Tuple
 import json
 import os
 import time
+from typing import Tuple
+
+from modules.options import cmd_opts
 
 
 def parse_codeblock(text):
@@ -22,63 +24,91 @@ LOOP_FIRST = 1
 LOOP = 2
 INTERRUPTED = 3
 
+STOPPED = 0
+LOOP = 1
+INTERRUPTED = 2
+
+
 class Context:
-    def __init__(self, history: Optional[List[Tuple[str, str]]] = None):
-        if history:
-            self.history = history
-        else:
-            self.history = []
+    def __init__(self):
+        self.model_history = None
+        self.history = []
         self.rh = []
-        self.state = STOPPED
         self.max_rounds = 25
         self.max_words = 8192
+        self.chat = True
+        self.state = STOPPED
 
-    def inferBegin(self):
-        self.state = LOOP_FIRST
+    # lazy init
+    def get_model_history(self):
+        if self.model_history is None:
+            from modules.model import model
+            self.model_history = model.create_context()
+        return self.model_history
+
+    def interrupt_and_wait(self):
+        # gradio发展神速啊
+        self.interrupt()
+        import time
+        while self.state != STOPPED:
+            time.sleep(1)
+            print("等待其他线程终止")
+
+    def infer_begin(self, query):
+        self.get_model_history()
+
+        self.interrupt_and_wait()
+        self.state = LOOP
 
         hl = len(self.history)
-        if hl == 0:
-            return
-        elif hl == self.max_rounds:
+        # 大概不会执行>1次
+        while hl >= self.max_rounds:
+            self.model_history.remove_first()
             self.history.pop(0)
             self.rh.pop(0)
-        elif hl > self.max_rounds:
-            self.history = self.history[-self.max_rounds:]
-            self.rh = self.rh[-self.max_rounds:]
+            hl -= 1
+
+        self.history.append((query, ""))
+        self.rh.append((query, ""))
+        self.model_history.add_last()
 
     def interrupt(self):
-        if self.state == LOOP_FIRST or self.state == LOOP:
+        if self.state == LOOP:
             self.state = INTERRUPTED
 
-    def inferLoop(self, query, output) -> bool:
-        # c: List[Tuple[str, str]]
-        if self.state == INTERRUPTED:
+    def infer_loop(self, output) -> bool:
+        query, _ = self.history[-1]
+        self.history[-1] = (query, output)
+        self.rh[-1] = (query, output)
+
+        if self.state != LOOP:
             return True
-        elif self.state == LOOP_FIRST:
-            self.history.append((query, output))
-            self.rh.append((query, parse_codeblock(output)))
-            self.state = LOOP
-        else:
-            self.history[-1] = (query, output)
-            self.rh[-1] = (query, output)
 
         return False
 
-    def inferEnd(self) -> None:
+    def infer_end(self) -> None:
         if self.rh:
             query, output = self.rh[-1]
             self.rh[-1] = (query, parse_codeblock(output))
         self.state = STOPPED
 
     def clear(self) -> None:
+        self.interrupt_and_wait()
+
+        if self.model_history:
+            self.model_history.clear()
         self.history = []
         self.rh = []
 
-    def revoke(self) -> List[Tuple[str, str]]:
-        if self.history and self.rh:
-            self.history.pop()
-            self.rh.pop()
-        return self.rh
+    def revoke(self) -> Tuple[str, str]:
+        self.interrupt_and_wait()
+
+        if not self.rh:
+            raise "无法撤回！"
+
+        self.model_history.remove_last()
+        self.history.pop()
+        return self.rh.pop()
 
     def limit_round(self):
         hl = len(self.history)
@@ -114,6 +144,7 @@ class Context:
 
     def save_history(self):
         s = [{"q": i[0], "o": i[1]} for i in self.history]
+
         filename = f"history-{int(time.time())}.json"
         p = os.path.join("outputs", "save", filename)
         with open(p, "w", encoding="utf-8") as f:
@@ -125,7 +156,7 @@ class Context:
         p = os.path.join("outputs", "markdown", filename)
         output = ""
         for i in self.history:
-            output += f"# 我: {i[0]}\n\nChatGLM: {i[1]}\n\n"
+            output += f"# 我: {i[0]}\n\nAI: {i[1]}\n\n"
         with open(p, "w", encoding="utf-8") as f:
             f.write(output)
         return f"成功保存至: {p}"
@@ -134,12 +165,12 @@ class Context:
         try:
             with open(file.name, "r", encoding='utf-8') as f:
                 j = json.load(f)
-                _hist = [(i["q"], i["o"]) for i in j]
-                _readable_hist = [(i["q"], parse_codeblock(i["o"])) for i in j]
+                self.history = [(i["q"], i["o"]) for i in j]
+                self.model_history.from_json(self.history)
+                self.rh = [(i[0], parse_codeblock(i[1])) for i in self.history]
         except Exception as e:
             print(e)
-        self.history = _hist.copy()
-        self.rh = _readable_hist.copy()
+
         return self.rh
 
     def edit_history(self, text, rnd_idx, obj_idx):
@@ -152,4 +183,4 @@ class Context:
             self.rh[rnd_idx] = (self.rh[rnd_idx][0], ok)
         return self.rh
 
-ctx = Context()
+global_ctx = Context() if cmd_opts.shared_session else None
