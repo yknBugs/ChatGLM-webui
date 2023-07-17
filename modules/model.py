@@ -1,124 +1,133 @@
-from typing import Optional, List, Tuple
+from typing import List, Tuple, Iterable
 
-from torch.cuda import get_device_properties
+import numpy as np
+import torch
 
 from modules.device import torch_gc
 from modules.options import cmd_opts
 
-tokenizer = None
-model = None
+np.set_printoptions(precision=4, suppress=True, linewidth=200)
 
 
-def prepare_model():
-    global model
-    if cmd_opts.cpu:
-        if cmd_opts.precision == "fp32":
-            model = model.float()
-        elif cmd_opts.precision == "bf16":
-            model = model.bfloat16()
-        else:
-            model = model.float()
-    else:
-        if cmd_opts.precision is None:
-            total_vram_in_gb = get_device_properties(0).total_memory / 1e9
-            print(f'显存: {total_vram_in_gb:.2f} GB')
+cached_codes = {}
 
-            if total_vram_in_gb > 30:
-                cmd_opts.precision = 'fp32'
-            elif total_vram_in_gb > 13:
-                cmd_opts.precision = 'fp16'
-            elif total_vram_in_gb > 10:
-                cmd_opts.precision = 'int8'
+
+class ModelContext:
+    def __init__(self, prompt_file=None):
+        if prompt_file is not None and len(prompt_file):
+            global cached_codes
+            if prompt_file in cached_codes:
+                code = cached_codes[prompt_file]
             else:
-                cmd_opts.precision = 'int4'
+                with open(prompt_file+".py", 'rb') as file:
+                    cached_codes[prompt_file] = code = compile(file.read(), prompt_file, 'exec')
 
-            print(f'根据你的显存容量，自动选择了精度 {cmd_opts.precision}'
-                  f' 如果你需要自己选择精度，'
-                  f' 请在启动时传入参数 --precision 来选择精度')
+            exec(code, self.__dict__)
+        else:
+            self.init_prompt = None
 
-        if cmd_opts.precision == "fp16":
-            model = model.half().cuda()
-        elif cmd_opts.precision == "int4":
-            model = model.half().quantize(4).cuda()
-        elif cmd_opts.precision == "int8":
-            model = model.half().quantize(8).cuda()
-        elif cmd_opts.precision == "fp32":
-            model = model.float()
+    def clear(self):
+        pass
 
-    model = model.eval()
+    def remove_first(self):
+        pass
+
+    def remove_last(self):
+        pass
+
+    def add_last(self):
+        pass
+
+    def from_json(self, history: List[Tuple[str, str]]):
+        pass
+
+
+class Model:
+    def __init__(self):
+        self.model = None
+        self.tokenizer = None
+
+    def load(self, model_path: str, precision: str = None, cpu: bool = False):
+        pass
+
+    def infer(self, query, ctx,
+              max_length: int, top_p: float, temperature: float) -> Iterable:
+        pass
+
+    def create_context(self) -> ModelContext:
+        return ModelContext()
+
+
+model: Model = None
 
 
 def load_model():
     if cmd_opts.ui_dev:
         return
 
-    from transformers import AutoConfig, AutoModel, AutoTokenizer
-    import os
-    import torch
+    global model
+    if cmd_opts.model_type == 'chatglm':
+        from modules.model_chatglm import ChatGLMModel
+        model = ChatGLMModel()
+    elif cmd_opts.model_type == 'chatrwkv':
+        from modules.model_chatrwkv import ChatRWKVModel
+        model = ChatRWKVModel()
+    else:
+        raise f"未知的模型类型{cmd_opts.model_type}"
+    model.load(cmd_opts.model_path, cmd_opts.precision, cmd_opts.cpu)
 
-    global tokenizer, model
 
-    # Load pretrained model and tokenizer
-    config = AutoConfig.from_pretrained(cmd_opts.model_path, trust_remote_code=True)
-    config.pre_seq_len = cmd_opts.pre_seq_len
-    config.prefix_projection = cmd_opts.prefix_projection
+def load_cached_model(model_path: str, load, name: str = None, compressor=None, torch_load=None):
+    import pickle, os
 
-    tokenizer = AutoTokenizer.from_pretrained(cmd_opts.model_path, trust_remote_code=True)
-    model = AutoModel.from_pretrained(cmd_opts.model_path, config=config, trust_remote_code=True)
+    cached_model = os.path.join(model_path, f"cache_{name}.pth")
+    if compressor is not None:
+        if os.path.isfile(cached_model):
+            try:
+                if torch_load is not None:
+                    return torch_load(cached_model)
+                else:
+                    with open(cached_model, "rb") as f:
+                        return pickle.load(f)
+            except Exception as e:
+                import traceback
+                traceback.print_exception(type(e), e, e.__traceback__)
 
-    if cmd_opts.ptuning_checkpoint is not None:
-        # Load ptuning weights
-        prefix_state_dict = torch.load(os.path.join(cmd_opts.ptuning_checkpoint, "pytorch_model.bin"))
-        new_prefix_state_dict = {}
-        for k, v in prefix_state_dict.items():
-            if k.startswith("transformer.prefix_encoder."):
-                new_prefix_state_dict[k[len("transformer.prefix_encoder."):]] = v
+    model1 = load()
 
-        model.transformer.prefix_encoder.load_state_dict(new_prefix_state_dict)
-    prepare_model()
+    if compressor is not None and not cmd_opts.dont_cache_compressed_model:
+        if torch_load is not None:
+            # modified torch just for me, you can ignore this param
+            torch.save(compressor(model1), cached_model, _use_model_foreach=True)
+        else:
+            model1 = compressor(model1)
+            with open(cached_model, "wb") as f:
+                pickle.dump(model1, f)
+
+    if compressor is not None and cmd_opts.dont_cache_compressed_model:
+        model1 = compressor(model1)
+    return model1
 
 
 def infer(query,
-          history: Optional[List[Tuple]],
-          max_length, top_p, temperature, use_stream_chat: bool):
+          ctx,
+          max_length, top_p, temperature):
     if cmd_opts.ui_dev:
         import time
         while True:
-          yield query, "hello, dev mode %s" % time.ctime()
-          time.sleep(1)
+            yield query, "hello, dev mode %s" % time.ctime()
+            time.sleep(1)
 
+    global model
     if not model:
         raise "模型未加载"
 
-    if history is None:
-        history = []
-
-    output_pos = 0
     try:
         print('-' * 50)
         print(str(query))
         print('=' * 50)
-        if use_stream_chat:
-            for output, history in model.stream_chat(
-                    tokenizer, query=query, history=history,
-                    max_length=max_length,
-                    top_p=top_p,
-                    temperature=temperature
-            ):
-                print(output[output_pos:], end='', flush=True)
-                output_pos = len(output)
-                yield query, output
-
-        else:
-            output, history = model.chat(
-                tokenizer, query=query, history=history,
-                max_length=max_length,
-                top_p=top_p,
-                temperature=temperature
-            )
-
-            print(output, end='')
-            yield query, output
+        for output in model.infer(query, ctx, max_length, top_p, temperature):
+            yield output
 
     except Exception as e:
         print("")

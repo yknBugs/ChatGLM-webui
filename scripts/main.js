@@ -62,6 +62,19 @@ document.addEventListener("DOMContentLoaded", function() {
 	});
 });
 
+let generate_button;
+onLoad(() => {
+	// c_generate
+	let base = get_uiCurrentTabContent();
+	generate_button = base.querySelector('button[id$=_generate]');
+	let textarea = base.querySelector("#chat-input textarea")
+	generate_button.addEventListener('click', () => {
+		textarea.value = "";
+		// update svelte internal state
+		textarea.dispatchEvent(new InputEvent("input"));
+	});
+});
+
 /**
  * Add a ctrl+enter as a shortcut to start a generation
  */
@@ -72,7 +85,6 @@ document.addEventListener('keydown', function(e) {
 		if (!(e.keyCode === 13 && (e.metaKey || e.ctrlKey))) return;
 	} else return;
 
-	button = get_uiCurrentTabContent().querySelector('button[id$=_generate]');
-	button&&button.click();
+	generate_button.click();
 	e.preventDefault();
 });
