@@ -17,8 +17,6 @@ def gr_show(visible=True):
 
 def predict(ctx, sh, query, max_length, top_p, temperature):
     ctx = myctx(ctx, sh)
-    ctx.limit_round()
-    ctx.limit_word()
     token = 0
     ctx_round = ctx.get_round()
     ctx_word = ctx.get_word()
@@ -77,17 +75,12 @@ def gr_show_and_load(ctx, evt: gr.SelectData):
 def gr_hide():
     return {'visible': False, '__type__': 'update'}, {'value': '', 'label': '', '__type__': 'update'}, []
 
-def apply_max_round_click(ctx, sh, max_round, chat_or_generate):
+def apply_max_round_click(ctx, sh, max_round, max_word, chat_or_generate):
     ctx = myctx(ctx, sh)
     ctx.max_rounds = max_round
+    ctx.max_words = max_word
     ctx.chat = chat_or_generate
-    return f"设置了最大对话轮数 {ctx.max_rounds}"
-
-def apply_max_words_click(ctx, sh, max_words, chat_or_generate):
-    ctx = myctx(ctx, sh)
-    ctx.max_words = max_words
-    ctx.chat = chat_or_generate
-    return f"设置了最大对话字数 {ctx.max_words}"
+    return f"设置了最大对话轮数 {ctx.max_rounds}，最大对话字数 {ctx.max_words}"
 
 def myctx(ctx, sh: bool):
     return global_ctx if sh and cmd_opts.shared_session else ctx
@@ -111,15 +104,6 @@ def create_ui():
                         with gr.Row():
                             top_p = gr.Slider(minimum=0.01, maximum=1.0, step=0.01, label='Top P', value=0.8)
                             temperature = gr.Slider(minimum=0.01, maximum=1.0, step=0.01, label='Temperature', value=0.95)
-
-                        cmd_output = gr.Textbox(label="Command Output", elem_id="cmd_output")
-                        with gr.Row():
-                            max_rounds = gr.Slider(minimum=1, maximum=100, step=1, label="最大对话轮数", value=25)
-                            apply_max_rounds = gr.Button("✔", elem_id="del-btn")
-
-                        with gr.Row():
-                            max_words = gr.Slider(minimum=32, maximum=32768, step=32, label='最大对话字数', value=8192)
-                            apply_max_words = gr.Button("✔", elem_id="del-btn")
 
                         cmd_output = gr.Textbox(label="消息输出")
                         with gr.Row():
@@ -259,16 +243,16 @@ def create_ui():
             btn.click(api_revoke, inputs=[session_id], outputs=[chatbot], api_name="revoke")
 
     with gr.Blocks(css=css, analytics_enabled=False) as settings_interface:
-        with gr.Row().style(equal_height=False):
+        with gr.Row(equal_height=False):
             with gr.Column(variant="panel"):
                 gr.HTML("<h1>通用</h1>")
-                max_rounds = gr.Slider(minimum=1, maximum=100, step=1, label="最大对话轮数", value=20)
+                max_rounds = gr.Slider(minimum=1, maximum=100, step=1, label="最大对话轮数", value=25)
+                max_words = gr.Slider(minimum=32, maximum=32768, step=32, label='最大对话字数', value=8192)
                 # 切换后建议手动清空对话...
                 chat_or_generate = gr.Checkbox(label='对话(关闭为续写)', value=True)
                 apply_max_rounds = gr.Button("✔", elem_id="del-btn")
 
-            apply_max_rounds.click(apply_max_round_click, inputs=[state, shared_context, max_rounds, chat_or_generate], outputs=[cmd_output])
-            apply_max_words.click(apply_max_words_click, inputs=[state, shared_context, max_words, chat_or_generate], outputs=[cmd_output])
+            apply_max_rounds.click(apply_max_round_click, inputs=[state, shared_context, max_rounds, max_words, chat_or_generate], outputs=[cmd_output])
 
             with gr.Column(variant="panel"):
                 gr.HTML("<h1>ChatRWKV模型</h1>")

@@ -54,8 +54,7 @@ def main():
             server_name="0.0.0.0" if cmd_opts.listen else None,
             server_port=cmd_opts.port,
             share=cmd_opts.share,
-            prevent_thread_lock=True,
-            root_path=cmd_opts.path_prefix,
+            prevent_thread_lock=True
         )
         wait_on_server(ui)
         print('重启界面...')

@@ -68,6 +68,19 @@ class Context:
             self.rh.pop(0)
             hl -= 1
 
+        prompt = ""
+        for i, (old_query, response) in enumerate(self.history):
+            prompt += "[Round {}]\n问：{}\n答：{}\n".format(i, old_query, response)
+        while len(prompt) > self.max_words:
+            self.model_history.remove_first()
+            self.history.pop(0)
+            self.rh.pop(0)
+            hl -= 1
+
+            prompt = ""
+            for i, (old_query, response) in enumerate(self.history):
+                prompt += "[Round {}]\n问：{}\n答：{}\n".format(i, old_query, response)
+
         self.history.append((query, ""))
         self.rh.append((query, ""))
         self.model_history.add_last()

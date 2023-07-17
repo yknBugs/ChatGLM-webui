@@ -8,7 +8,9 @@ from modules.options import cmd_opts
 
 np.set_printoptions(precision=4, suppress=True, linewidth=200)
 
+
 cached_codes = {}
+
 
 class ModelContext:
     def __init__(self, prompt_file=None):
@@ -101,6 +103,9 @@ def load_cached_model(model_path: str, load, name: str = None, compressor=None, 
             model1 = compressor(model1)
             with open(cached_model, "wb") as f:
                 pickle.dump(model1, f)
+
+    if compressor is not None and cmd_opts.dont_cache_compressed_model:
+        model1 = compressor(model1)
     return model1
 
 
@@ -117,17 +122,12 @@ def infer(query,
     if not model:
         raise "模型未加载"
 
-    if history is None:
-        history = []
-
-    output_pos = 0
     try:
         print('-' * 50)
         print(str(query))
         print('=' * 50)
         for output in model.infer(query, ctx, max_length, top_p, temperature):
             yield output
-            print(output, end='')
 
     except Exception as e:
         print("")
