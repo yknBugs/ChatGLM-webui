@@ -44,6 +44,8 @@ def prepare_model():
             model = model.half().quantize(8).cuda()
         elif cmd_opts.precision == "fp32":
             model = model.float()
+        elif cmd_opts.precision == "mps":
+            model = model.to('mps')
 
     model = model.eval()
 
