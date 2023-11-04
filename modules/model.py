@@ -1,4 +1,4 @@
-from typing import Optional, List, Tuple
+import traceback
 
 from torch.cuda import get_device_properties
 
@@ -80,20 +80,31 @@ def load_model():
     prepare_model()
 
 
-def infer(query,
-          history: Optional[List[Tuple]],
+def infer(query, history,
           max_length, top_p, temperature, use_stream_chat: bool):
     if cmd_opts.ui_dev:
         import time
         while True:
-          yield query, "hello, dev mode %s" % time.ctime()
-          time.sleep(1)
+            yield query, "hello, dev mode %s" % time.ctime(), history
+            time.sleep(1)
 
     if not model:
         raise "模型未加载"
 
     if history is None:
         history = []
+
+    #####
+    #  ChatGLM2 以下的 History 返回格式
+    #  [('你好', '你好！有什么我可以帮助你的吗'), ('你是谁', '我是一个大型语言模型')]
+    #
+    #  ChatGLM3 History 返回格式
+    #  [{'role': 'user', 'content': '你好'}, 
+    #   {'role': 'assistant', 'metadata': '', 'content': '你好！有什么我可以帮助你的吗？'}, 
+    #   {'role': 'user', 'content': '你是谁'}, 
+    #   {'role': 'assistant', 'metadata': '', 'content': '我是一个大型语言模型。'}]
+    #  TODO: 完成历史记录的兼容
+    #####
 
     output_pos = 0
     try:
@@ -109,7 +120,7 @@ def infer(query,
             ):
                 print(output[output_pos:], end='', flush=True)
                 output_pos = len(output)
-                yield query, output
+                yield query, output, history
 
         else:
             output, history = model.chat(
@@ -120,12 +131,13 @@ def infer(query,
             )
 
             print(output, end='')
-            yield query, output
+            yield query, output, history
 
     except Exception as e:
         print("")
         print('*' * 50)
         print(f"生成失败: {repr(e)}", end='')
+        traceback.print_exception(e)
 
     print()
     torch_gc()

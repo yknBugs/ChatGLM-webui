@@ -1,8 +1,9 @@
-from typing import Optional, List, Tuple
+from typing import List, Tuple
 import json
 import os
 import time
-
+import traceback
+from modules.options import cmd_opts
 
 def parse_codeblock(text):
     lines = text.split("\n")
@@ -23,7 +24,7 @@ LOOP = 2
 INTERRUPTED = 3
 
 class Context:
-    def __init__(self, history: Optional[List[Tuple[str, str]]] = None):
+    def __init__(self, history = None):
         if history:
             self.history = history
         else:
@@ -34,34 +35,25 @@ class Context:
         self.max_words = 8192
 
     def inferBegin(self):
+        self.limit_round()
+        self.limit_word()
         self.state = LOOP_FIRST
-
-        hl = len(self.history)
-        if hl == 0:
-            return
-        elif hl == self.max_rounds:
-            self.history.pop(0)
-            self.rh.pop(0)
-        elif hl > self.max_rounds:
-            self.history = self.history[-self.max_rounds:]
-            self.rh = self.rh[-self.max_rounds:]
 
     def interrupt(self):
         if self.state == LOOP_FIRST or self.state == LOOP:
             self.state = INTERRUPTED
 
-    def inferLoop(self, query, output) -> bool:
+    def inferLoop(self, query, output, history) -> bool:
         # c: List[Tuple[str, str]]
         if self.state == INTERRUPTED:
             return True
         elif self.state == LOOP_FIRST:
-            self.history.append((query, output))
+            self.history = history
             self.rh.append((query, parse_codeblock(output)))
             self.state = LOOP
         else:
-            self.history[-1] = (query, output)
+            self.history = history
             self.rh[-1] = (query, output)
-
         return False
 
     def inferEnd(self) -> None:
@@ -77,43 +69,50 @@ class Context:
     def revoke(self) -> List[Tuple[str, str]]:
         if self.history and self.rh:
             self.history.pop()
+            if cmd_opts.model is None or cmd_opts.model == "chatglm3":
+                self.history.pop()
             self.rh.pop()
         return self.rh
 
     def limit_round(self):
-        hl = len(self.history)
-        if hl == 0:
-            return
-        elif hl == self.max_rounds:
-            self.history.pop(0)
-            self.rh.pop(0)
-        elif hl > self.max_rounds:
-            self.history = self.history[-self.max_rounds:]
-            self.rh = self.rh[-self.max_rounds:]
+        if cmd_opts.model is None or cmd_opts.model == "chatglm3":
+            while len(self.history) >= self.max_rounds * 2:
+                self.history.pop(0)
+                self.history.pop(0)
+                self.rh.pop(0)
+        else:
+            while len(self.history) >= self.max_rounds:
+                self.history.pop(0)
+                self.rh.pop(0)
 
     def limit_word(self):
-        prompt = ""
-        for i, (old_query, response) in enumerate(self.history):
-            prompt += "[Round {}]\n问：{}\n答：{}\n".format(i, old_query, response)
-        while len(prompt) > self.max_words:
+        while self.get_word() > self.max_words:
+            if cmd_opts.model is None or cmd_opts.model == "chatglm3":
+                self.history.pop(0)
             self.history.pop(0)
             self.rh.pop(0)
 
-            prompt = ""
-            for i, (old_query, response) in enumerate(self.history):
-                prompt += "[Round {}]\n问：{}\n答：{}\n".format(i, old_query, response)
-
     def get_round(self) -> int:
+        if cmd_opts.model is None or cmd_opts.model == "chatglm3":
+            return len(self.history) / 2
         return len(self.history)
 
     def get_word(self) -> int:
         prompt = ""
-        for i, (old_query, response) in enumerate(self.history):
-            prompt += "[Round {}]\n问：{}\n答：{}\n".format(i, old_query, response)
+        if cmd_opts.model is None or cmd_opts.model == "chatglm3":
+            for i, message in enumerate(self.history):
+                prompt += "[Msg{}]{}".format(i, message['content'])
+        else:
+            for i, (old_query, response) in enumerate(self.history):
+                prompt += "[Round {}]\n问：{}\n答：{}\n".format(i, old_query, response)
         return len(prompt)
 
     def save_history(self):
-        s = [{"q": i[0], "o": i[1]} for i in self.history]
+        s = []
+        if cmd_opts.model is None or cmd_opts.model == "chatglm3":
+            s = self.history
+        else:
+            s = [{"q": i[0], "o": i[1]} for i in self.history]
         filename = f"history-{int(time.time())}.json"
         p = os.path.join("outputs", "save", filename)
         with open(p, "w", encoding="utf-8") as f:
@@ -125,7 +124,10 @@ class Context:
         p = os.path.join("outputs", "markdown", filename)
         output = ""
         for i in self.history:
-            output += f"# 我: {i[0]}\n\nChatGLM: {i[1]}\n\n"
+            if cmd_opts.model is None or cmd_opts.model == "chatglm3":
+                output += f"# {i['role']}: {i['content']}\n\n"
+            else:
+                output += f"# 我: {i[0]}\n\nChatGLM: {i[1]}\n\n"
         with open(p, "w", encoding="utf-8") as f:
             f.write(output)
         return f"成功保存至: {p}"
@@ -134,21 +136,39 @@ class Context:
         try:
             with open(file.name, "r", encoding='utf-8') as f:
                 j = json.load(f)
-                _hist = [(i["q"], i["o"]) for i in j]
-                _readable_hist = [(i["q"], parse_codeblock(i["o"])) for i in j]
+                _hist = []
+                _readable_hist = []
+                if cmd_opts.model is None or cmd_opts.model == "chatglm3":
+                    _hist = j
+                    for i in j:
+                        if i['role'] == 'user':
+                            _readable_hist.append((i['content'], ''))
+                        elif i['role'] == 'assistant':
+                            _readable_hist[-1] = (_readable_hist[-1][0], i['content'])
+                else:
+                    _hist = [(i["q"], i["o"]) for i in j]
+                    _readable_hist = [(i["q"], parse_codeblock(i["o"])) for i in j]
         except Exception as e:
-            print(e)
+            print('*' * 50)
+            print(f"读取文件失败: {repr(e)}", end='')
+            traceback.print_exception(e)
         self.history = _hist.copy()
         self.rh = _readable_hist.copy()
         return self.rh
 
     def edit_history(self, text, rnd_idx, obj_idx):
         if obj_idx == 0:
-            self.history[rnd_idx] = (text, self.history[rnd_idx][1])
+            if cmd_opts.model is None or cmd_opts.model == "chatglm3":
+                self.history[rnd_idx * 2]['content'] = text
+            else:
+                self.history[rnd_idx] = (text, self.history[rnd_idx][1])
             self.rh[rnd_idx] = (text, self.rh[rnd_idx][1])
         elif obj_idx == 1:
             ok = parse_codeblock(text)
-            self.history[rnd_idx] = (self.history[rnd_idx][0], text)
+            if cmd_opts.model is None or cmd_opts.model == "chatglm3":
+                self.history[rnd_idx * 2 + 1]['content'] = text
+            else:
+                self.history[rnd_idx] = (self.history[rnd_idx][0], text)
             self.rh[rnd_idx] = (self.rh[rnd_idx][0], ok)
         return self.rh
 

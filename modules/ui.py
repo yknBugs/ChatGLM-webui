@@ -14,16 +14,13 @@ def gr_show(visible=True):
     return {"visible": visible, "__type__": "update"}
 
 def predict(ctx, query, max_length, top_p, temperature, use_stream_chat):
-    ctx.limit_round()
-    ctx.limit_word()
-
     ctx.inferBegin()
     token = 0
     ctx_round = ctx.get_round()
     ctx_word = ctx.get_word()
     yield ctx.rh, "正在生成回复内容...", f"总对话轮数: {ctx_round}\n总对话字数: {ctx_word}\nToken 数: {token}"
 
-    for _, output in infer(
+    for _, output, history in infer(
             query=query,
             history=ctx.history,
             max_length=max_length,
@@ -31,7 +28,7 @@ def predict(ctx, query, max_length, top_p, temperature, use_stream_chat):
             temperature=temperature,
             use_stream_chat=use_stream_chat
     ):
-        if ctx.inferLoop(query, output):
+        if ctx.inferLoop(query, output, history):
             print("")
             break
 
@@ -44,10 +41,12 @@ def predict(ctx, query, max_length, top_p, temperature, use_stream_chat):
 def regenerate(ctx, max_length, top_p, temperature, use_stream_chat):
     if not ctx.rh:
         print('*' * 50)
-        raise RuntimeWarning("没有过去的对话")
+        raise "没有过去的对话"
     
     query, output = ctx.rh.pop()
     ctx.history.pop()
+    if options.cmd_opts.model is None or options.cmd_opts.model == "chatglm3":
+        ctx.history.pop()
 
     for p0, p1, p2 in predict(ctx, query, max_length, top_p, temperature, use_stream_chat):
         yield p0, p1, p2
@@ -58,9 +57,15 @@ def clear_history(ctx):
 
 def edit_history(ctx, log, idx):
     if log == '':
-        return ctx.rh, {'visible': True, '__type__': 'update'},  {'value': ctx.history[idx[0]][idx[1]], '__type__': 'update'}, idx
+        if options.cmd_opts.model is None or options.cmd_opts.model == "chatglm3":
+            return ctx.rh, {'visible': True, '__type__': 'update'},  {'value': ctx.history[idx[0] * 2 + idx[1]]['content'], '__type__': 'update'}, idx
+        else:
+            return ctx.rh, {'visible': True, '__type__': 'update'},  {'value': ctx.history[idx[0]][idx[1]], '__type__': 'update'}, idx
     print('+' * 50)
-    print(ctx.history[idx[0]][idx[1]])
+    if options.cmd_opts.model is None or options.cmd_opts.model == "chatglm3":
+        print(ctx.history[idx[0] * 2 + idx[1]]['content'])
+    else:
+        print(ctx.history[idx[0]][idx[1]])
     print("----->")
     print(log)
     ctx.edit_history(log, idx[0], idx[1])
@@ -71,7 +76,10 @@ def gr_show_and_load(ctx, evt: gr.SelectData):
         label = f'修改提问内容{evt.index[0]}：'
     else:
         label = f'修改回答内容{evt.index[0]}：'
-    return {'visible': True, '__type__': 'update'}, {'value': ctx.history[evt.index[0]][evt.index[1]], 'label': label, '__type__': 'update'}, evt.index
+    if options.cmd_opts.model is None or options.cmd_opts.model == "chatglm3":
+        return {'visible': True, '__type__': 'update'}, {'value': ctx.history[evt.index[0] * 2 + evt.index[1]]['content'], 'label': label, '__type__': 'update'}, evt.index
+    else:
+        return {'visible': True, '__type__': 'update'}, {'value': ctx.history[evt.index[0]][evt.index[1]], 'label': label, '__type__': 'update'}, evt.index
 
 def gr_hide():
     return {'visible': False, '__type__': 'update'}, {'value': '', 'label': '', '__type__': 'update'}, []
