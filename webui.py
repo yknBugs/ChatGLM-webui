@@ -1,6 +1,7 @@
 import os
 import time
 import sysconfig
+import webbrowser
 from modules import options
 
 from modules.model import load_model
@@ -49,8 +50,10 @@ def main():
             prevent_thread_lock=True,
             root_path=cmd_opts.path_prefix,
         )
+        if cmd_opts.autolaunch:
+            webbrowser.open(f"http://127.0.0.1:{cmd_opts.port}")
         wait_on_server(ui)
-        print('Restarting UI...')
+        print('重启WebUI...')
 
 
 if __name__ == "__main__":

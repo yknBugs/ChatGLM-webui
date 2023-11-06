@@ -146,7 +146,7 @@ def create_ui():
                     with gr.Column():
                         log = gr.Textbox(placeholder="输入你修改后的内容", lines=4, elem_id="chat-input", container=False)
                         with gr.Row():
-                            submit_log = gr.Button('保存')
+                            submit_log = gr.Button('保存', variant="primary")
                             cancel_log = gr.Button('取消')
                 log_idx = gr.State([])
 
@@ -156,7 +156,7 @@ def create_ui():
                     stop_generate = gr.Button("❌", elem_id="del-btn")
 
                 with gr.Row():
-                    submit = gr.Button("发送", elem_id="c_generate")
+                    submit = gr.Button("发送", elem_id="c_generate", variant="primary")
 
                 with gr.Row():
                     revoke_btn = gr.Button("撤回")

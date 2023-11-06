@@ -6,17 +6,48 @@ import traceback
 from modules.options import cmd_opts
 
 def parse_codeblock(text):
-    lines = text.split("\n")
-    for i, line in enumerate(lines):
-        if "```" in line:
-            if line != "```":
-                lines[i] = f'<pre><code class="{lines[i][3:]}">'
+    if cmd_opts.model is None or cmd_opts.model == "chatglm3":
+        lines = text.split("\n")
+        lines = [line for line in lines if line != ""]
+        count = 0
+        for i, line in enumerate(lines):
+            if "```" in line:
+                count += 1
+                items = line.split('`')
+                if count % 2 == 1:
+                    lines[i] = f'<pre><code class="language-{items[-1]}">'
+                else:
+                    lines[i] = f'<br></code></pre>'
             else:
-                lines[i] = '</code></pre>'
-        else:
-            if i > 0:
-                lines[i] = "<br/>" + line.replace("<", "&lt;").replace(">", "&gt;")
-    return "".join(lines)
+                if i > 0:
+                    if count % 2 == 1:
+                        line = line.replace("`", "\`")
+                        line = line.replace("<", "&lt;")
+                        line = line.replace(">", "&gt;")
+                        line = line.replace(" ", "&nbsp;")
+                        line = line.replace("*", "&ast;")
+                        line = line.replace("_", "&lowbar;")
+                        line = line.replace("-", "&#45;")
+                        line = line.replace(".", "&#46;")
+                        line = line.replace("!", "&#33;")
+                        line = line.replace("(", "&#40;")
+                        line = line.replace(")", "&#41;")
+                        line = line.replace("$", "&#36;")
+                    lines[i] = "<br>"+line
+        text = "".join(lines)
+        return text
+    else:
+        lines = text.split("\n")
+        for i, line in enumerate(lines):
+            if "```" in line:
+                if line != "```":
+                    lines[i] = f'<pre><code class="{lines[i][3:]}">'
+                else:
+                    lines[i] = '</code></pre>'
+            else:
+                if i > 0:
+                    lines[i] = "<br/>" + line.replace("<", "&lt;").replace(">", "&gt;")
+        return "".join(lines)
 
 STOPPED = 0
 LOOP_FIRST = 1
@@ -112,7 +143,9 @@ class Context:
         if cmd_opts.model is None or cmd_opts.model == "chatglm3":
             s = self.history
         else:
-            s = [{"q": i[0], "o": i[1]} for i in self.history]
+            for i in self.history:
+                s.append({'role': 'user', 'content': i[0]})
+                s.append({'role': 'assistant', 'metadata': '', 'content': i[1]})
         filename = f"history-{int(time.time())}.json"
         p = os.path.join("outputs", "save", filename)
         with open(p, "w", encoding="utf-8") as f:
@@ -138,16 +171,16 @@ class Context:
                 j = json.load(f)
                 _hist = []
                 _readable_hist = []
+                for i in j:
+                    if i['role'] == 'user':
+                        _readable_hist.append((i['content'], ''))
+                    elif i['role'] == 'assistant':
+                        _readable_hist[-1] = (_readable_hist[-1][0], i['content'])
                 if cmd_opts.model is None or cmd_opts.model == "chatglm3":
                     _hist = j
-                    for i in j:
-                        if i['role'] == 'user':
-                            _readable_hist.append((i['content'], ''))
-                        elif i['role'] == 'assistant':
-                            _readable_hist[-1] = (_readable_hist[-1][0], i['content'])
                 else:
-                    _hist = [(i["q"], i["o"]) for i in j]
-                    _readable_hist = [(i["q"], parse_codeblock(i["o"])) for i in j]
+                    _hist = _readable_hist.copy()
+                _readable_hist = [(i[0], parse_codeblock(i[1])) for i in _readable_hist]
         except Exception as e:
             print('*' * 50)
             print(f"读取文件失败: {repr(e)}", end='')

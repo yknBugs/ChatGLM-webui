@@ -103,7 +103,6 @@ def infer(query, history,
     #   {'role': 'assistant', 'metadata': '', 'content': '你好！有什么我可以帮助你的吗？'}, 
     #   {'role': 'user', 'content': '你是谁'}, 
     #   {'role': 'assistant', 'metadata': '', 'content': '我是一个大型语言模型。'}]
-    #  TODO: 完成历史记录的兼容
     #####
 
     output_pos = 0
