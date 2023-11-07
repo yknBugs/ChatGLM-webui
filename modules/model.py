@@ -84,6 +84,11 @@ def infer(query, history,
           max_length, top_p, temperature, use_stream_chat: bool):
     if cmd_opts.ui_dev:
         import time
+        if cmd_opts.model is None or cmd_opts.model == "chatglm3":
+            history.append({'role': 'user', 'content': query})
+            history.append({'role': 'assistant', 'metadata': '', 'content': "hello, dev mode %s" % time.ctime()})
+        else:
+            history.append((query, "hello, dev mode %s" % time.ctime()))
         while True:
             yield query, "hello, dev mode %s" % time.ctime(), history
             time.sleep(1)

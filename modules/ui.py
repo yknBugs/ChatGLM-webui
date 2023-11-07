@@ -41,7 +41,7 @@ def predict(ctx, query, max_length, top_p, temperature, use_stream_chat):
 def regenerate(ctx, max_length, top_p, temperature, use_stream_chat):
     if not ctx.rh:
         print('*' * 50)
-        raise "没有过去的对话"
+        raise RuntimeError("没有过去的对话")
     
     query, output = ctx.rh.pop()
     ctx.history.pop()
@@ -58,12 +58,12 @@ def clear_history(ctx):
 def edit_history(ctx, log, idx):
     if log == '':
         if options.cmd_opts.model is None or options.cmd_opts.model == "chatglm3":
-            return ctx.rh, {'visible': True, '__type__': 'update'},  {'value': ctx.history[idx[0] * 2 + idx[1]]['content'], '__type__': 'update'}, idx
+            return ctx.rh, {'visible': True, '__type__': 'update'},  {'value': ctx.history[idx[0] * 2 + idx[1] + ctx.sysprompt_value]['content'], '__type__': 'update'}, idx
         else:
             return ctx.rh, {'visible': True, '__type__': 'update'},  {'value': ctx.history[idx[0]][idx[1]], '__type__': 'update'}, idx
     print('+' * 50)
     if options.cmd_opts.model is None or options.cmd_opts.model == "chatglm3":
-        print(ctx.history[idx[0] * 2 + idx[1]]['content'])
+        print(ctx.history[idx[0] * 2 + idx[1] + ctx.sysprompt_value]['content'])
     else:
         print(ctx.history[idx[0]][idx[1]])
     print("----->")
@@ -77,7 +77,7 @@ def gr_show_and_load(ctx, evt: gr.SelectData):
     else:
         label = f'修改回答内容{evt.index[0]}：'
     if options.cmd_opts.model is None or options.cmd_opts.model == "chatglm3":
-        return {'visible': True, '__type__': 'update'}, {'value': ctx.history[evt.index[0] * 2 + evt.index[1]]['content'], 'label': label, '__type__': 'update'}, evt.index
+        return {'visible': True, '__type__': 'update'}, {'value': ctx.history[evt.index[0] * 2 + evt.index[1] + ctx.sysprompt_value]['content'], 'label': label, '__type__': 'update'}, evt.index
     else:
         return {'visible': True, '__type__': 'update'}, {'value': ctx.history[evt.index[0]][evt.index[1]], 'label': label, '__type__': 'update'}, evt.index
 
@@ -90,7 +90,43 @@ def apply_max_round_click(ctx, max_round):
 
 def apply_max_words_click(ctx, max_words):
     ctx.max_words = max_words
-    return f"成功设置: 最大对话字数 {ctx.max_words}"
+    return f"成功设置: 最大对话字数 {ctx.max_words}" 
+
+def enable_system_prompt(ctx, value, prompt):
+    if options.cmd_opts.model is None or options.cmd_opts.model == "chatglm3":
+        if value == True:
+            ctx.sysprompt_value = 1
+            if ctx.history == [] or ctx.history[0]['role'] != 'system':
+                ctx.history.insert(0, {'role': 'system', 'content': prompt})
+            else:
+                ctx.history[0]['content'] = prompt
+            return "系统(全局)提示词已启用", gr_show(), gr_show(), gr_show()
+        else:
+            ctx.sysprompt_value = 0
+            new_prompt = prompt
+            if ctx.history != [] and ctx.history[0]['role'] == 'system':
+                new_prompt = ctx.history[0]['content']
+                ctx.history.pop(0)
+            return "系统(全局)提示词已禁用", {'value': new_prompt, 'visible': False, '__type__': 'update'}, gr_show(False), gr_show(False)
+    return "此模型暂不支持使用系统(全局)提示词", gr_show(False), gr_show(False), gr_show(False)
+
+def submit_system_prompt(ctx, prompt):
+    if options.cmd_opts.model is None or options.cmd_opts.model == "chatglm3":
+        ctx.sysprompt_value = 1
+        if ctx.history == [] or ctx.history[0]['role'] != 'system':
+            ctx.history.insert(0, {'role': 'system', 'content': prompt})
+        else:
+            ctx.history[0]['content'] = prompt
+        return "系统(全局)提示词已更新"
+    return "此模型暂不支持使用系统(全局)提示词"
+
+def undo_system_prompt(ctx):
+    if options.cmd_opts.model is None or options.cmd_opts.model == "chatglm3":
+        if ctx.history == [] or ctx.history[0]['role'] != 'system':
+            return "你是ChatGLM3，由智谱AI训练的一个语言模型，请根据用户的指示正确的回答用户的问题。", "已恢复默认的系统(全局)提示词"
+        else:
+            return ctx.history[0]['content'], "已撤销对系统(全局)提示词的更改"
+    return "你是ChatGLM3，由智谱AI训练的一个语言模型，请根据用户的指示正确的回答用户的问题。", "此模型暂不支持使用系统(全局)提示词"
 
 def create_ui():
     reload_javascript()
@@ -117,7 +153,7 @@ def create_ui():
                             max_words = gr.Slider(minimum=32, maximum=32768, step=32, label='最大对话字数', value=8192)
                             apply_max_words = gr.Button("✔", elem_id="del-btn")
 
-                        cmd_output = gr.Textbox(label="消息输出")
+                        cmd_output = gr.Textbox(label="消息输出", interactive=False)
                         with gr.Row():
                             use_stream_chat = gr.Checkbox(label='使用流式输出', value=True)
                 with gr.Row():
@@ -195,7 +231,6 @@ def create_ui():
         clear_input.click(lambda x: "", inputs=[input_message], outputs=[input_message])
         save_his_btn.click(lambda ctx: ctx.save_history(), inputs=[state], outputs=[cmd_output])
         save_md_btn.click(lambda ctx: ctx.save_as_md(), inputs=[state], outputs=[cmd_output])
-        load_his_btn.upload(lambda ctx, f: ctx.load_history(f), inputs=[state, load_his_btn], outputs=[chatbot])
         sync_his_btn.click(lambda ctx: ctx.rh, inputs=[state], outputs=[chatbot])
         apply_max_rounds.click(apply_max_round_click, inputs=[state, max_rounds], outputs=[cmd_output])
         apply_max_words.click(apply_max_words_click, inputs=[state, max_words], outputs=[cmd_output])
@@ -205,11 +240,28 @@ def create_ui():
 
     with gr.Blocks(css=css, analytics_enabled=False) as settings_interface:
         with gr.Row():
+            setting_output = gr.Textbox(label="消息输出", interactive=False)
+
+        with gr.Row():
+            enable_sysprompt = gr.Checkbox(False, label="启动系统(全局)提示词")
+        
+        with gr.Row():
+            system_prompt = gr.Textbox(value="你是ChatGLM3，由智谱AI训练的一个语言模型，请根据用户的指示正确的回答用户的问题。", placeholder="输入系统(全局)提示词的内容", visible=False, show_label=False, lines=10, container=False)
+        
+        with gr.Row():
+            submit_sysprompt = gr.Button("更新系统(全局)提示词", variant="primary", visible=False)
+            undo_sysprompt = gr.Button("放弃系统(全局)提示词更改", visible=False)
+
+        with gr.Row():
             reload_ui = gr.Button("重启 WebUI")
 
         def restart_ui():
             options.need_restart = True
 
+        enable_sysprompt.change(enable_system_prompt, inputs=[state, enable_sysprompt, system_prompt], outputs=[setting_output, system_prompt, submit_sysprompt, undo_sysprompt])
+        submit_sysprompt.click(submit_system_prompt, inputs=[state, system_prompt], outputs=[setting_output])
+        undo_sysprompt.click(undo_system_prompt, inputs=[state], outputs=[system_prompt, setting_output])
+        load_his_btn.upload(lambda ctx, f: ctx.load_history(f), inputs=[state, load_his_btn], outputs=[chatbot, enable_sysprompt, system_prompt])
         reload_ui.click(restart_ui)
 
     interfaces = [

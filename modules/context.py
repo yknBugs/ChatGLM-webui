@@ -60,6 +60,7 @@ class Context:
             self.history = history
         else:
             self.history = []
+        self.sysprompt_value = 0
         self.rh = []
         self.state = STOPPED
         self.max_rounds = 25
@@ -94,7 +95,10 @@ class Context:
         self.state = STOPPED
 
     def clear(self) -> None:
-        self.history = []
+        if self.sysprompt_value == 1:
+            self.history = [self.history[0]]
+        else:
+            self.history = []
         self.rh = []
 
     def revoke(self) -> List[Tuple[str, str]]:
@@ -107,7 +111,7 @@ class Context:
 
     def limit_round(self):
         if cmd_opts.model is None or cmd_opts.model == "chatglm3":
-            while len(self.history) >= self.max_rounds * 2:
+            while len(self.history) - self.sysprompt_value >= self.max_rounds * 2:
                 self.history.pop(0)
                 self.history.pop(0)
                 self.rh.pop(0)
@@ -125,13 +129,15 @@ class Context:
 
     def get_round(self) -> int:
         if cmd_opts.model is None or cmd_opts.model == "chatglm3":
-            return len(self.history) / 2
+            return (len(self.history) - self.sysprompt_value) / 2
         return len(self.history)
 
     def get_word(self) -> int:
         prompt = ""
         if cmd_opts.model is None or cmd_opts.model == "chatglm3":
             for i, message in enumerate(self.history):
+                if message['role'] == 'system':
+                    continue
                 prompt += "[Msg{}]{}".format(i, message['content'])
         else:
             for i, (old_query, response) in enumerate(self.history):
@@ -166,40 +172,48 @@ class Context:
         return f"成功保存至: {p}"
 
     def load_history(self, file):
+        enable_sysprompt = False
+        sysprompt = ''
         try:
             with open(file.name, "r", encoding='utf-8') as f:
                 j = json.load(f)
                 _hist = []
                 _readable_hist = []
                 for i in j:
-                    if i['role'] == 'user':
+                    if i['role'] == 'system':
+                        enable_sysprompt = True
+                        sysprompt = i['content']
+                    elif i['role'] == 'user':
                         _readable_hist.append((i['content'], ''))
                     elif i['role'] == 'assistant':
                         _readable_hist[-1] = (_readable_hist[-1][0], i['content'])
                 if cmd_opts.model is None or cmd_opts.model == "chatglm3":
                     _hist = j
                 else:
+                    enable_sysprompt = False
                     _hist = _readable_hist.copy()
                 _readable_hist = [(i[0], parse_codeblock(i[1])) for i in _readable_hist]
+            self.history = _hist.copy()
+            self.rh = _readable_hist.copy()
         except Exception as e:
             print('*' * 50)
             print(f"读取文件失败: {repr(e)}", end='')
             traceback.print_exception(e)
-        self.history = _hist.copy()
-        self.rh = _readable_hist.copy()
-        return self.rh
+        if enable_sysprompt:
+            return self.rh, True, {'value': sysprompt, 'visible': True, '__type__': 'update'}
+        return self.rh, False, {'visible': False, '__type__': 'update'}
 
     def edit_history(self, text, rnd_idx, obj_idx):
         if obj_idx == 0:
             if cmd_opts.model is None or cmd_opts.model == "chatglm3":
-                self.history[rnd_idx * 2]['content'] = text
+                self.history[rnd_idx * 2 + self.sysprompt_value]['content'] = text
             else:
                 self.history[rnd_idx] = (text, self.history[rnd_idx][1])
             self.rh[rnd_idx] = (text, self.rh[rnd_idx][1])
         elif obj_idx == 1:
             ok = parse_codeblock(text)
             if cmd_opts.model is None or cmd_opts.model == "chatglm3":
-                self.history[rnd_idx * 2 + 1]['content'] = text
+                self.history[rnd_idx * 2 + self.sysprompt_value + 1]['content'] = text
             else:
                 self.history[rnd_idx] = (self.history[rnd_idx][0], text)
             self.rh[rnd_idx] = (self.rh[rnd_idx][0], ok)
