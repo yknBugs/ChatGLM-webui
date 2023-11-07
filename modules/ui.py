@@ -28,7 +28,7 @@ def predict(ctx, query, max_length, top_p, temperature, use_stream_chat):
             temperature=temperature,
             use_stream_chat=use_stream_chat
     ):
-        if ctx.inferLoop(query, output, history):
+        if ctx.inferLoop(history):
             print("")
             break
 
@@ -43,32 +43,42 @@ def regenerate(ctx, max_length, top_p, temperature, use_stream_chat):
         print('*' * 50)
         raise RuntimeError("没有过去的对话")
     
-    query, output = ctx.rh.pop()
-    ctx.history.pop()
+    i = ctx.history.pop()
     if options.cmd_opts.model is None or options.cmd_opts.model == "chatglm3":
-        ctx.history.pop()
+        while ctx.history and ctx.history[-1]['role'] == 'assistant':
+            i = ctx.history.pop()
+        i = ctx.history.pop()
+        query = i['content']
+    else:
+        query = i[0]
+    ctx.sync_history()
+
+    print('+' * 50)
+    print("撤回上一条消息")
 
     for p0, p1, p2 in predict(ctx, query, max_length, top_p, temperature, use_stream_chat):
         yield p0, p1, p2
 
+def revoke(ctx):
+    print('+' * 50)
+    print("撤回上一条消息")
+    return ctx.revoke(), "已撤回上一条消息", {'visible': False, '__type__': 'update'}, {'value': '', 'label': '', '__type__': 'update'}, []
+
 def clear_history(ctx):
     ctx.clear()
-    return gr.update(value=[]), "已清空对话"
+    print('+' * 50)
+    print("清空对话")
+    return gr.update(value=[]), "已清空对话", {'visible': False, '__type__': 'update'}, {'value': '', 'label': '', '__type__': 'update'}, []
 
 def edit_history(ctx, log, idx):
+    round_index, role_index = ctx.get_history(idx[0], idx[1])
     if log == '':
-        if options.cmd_opts.model is None or options.cmd_opts.model == "chatglm3":
-            return ctx.rh, {'visible': True, '__type__': 'update'},  {'value': ctx.history[idx[0] * 2 + idx[1] + ctx.sysprompt_value]['content'], '__type__': 'update'}, idx
-        else:
-            return ctx.rh, {'visible': True, '__type__': 'update'},  {'value': ctx.history[idx[0]][idx[1]], '__type__': 'update'}, idx
+        return ctx.rh, {'visible': True, '__type__': 'update'},  {'value': ctx.history[round_index][role_index], '__type__': 'update'}, idx
     print('+' * 50)
-    if options.cmd_opts.model is None or options.cmd_opts.model == "chatglm3":
-        print(ctx.history[idx[0] * 2 + idx[1] + ctx.sysprompt_value]['content'])
-    else:
-        print(ctx.history[idx[0]][idx[1]])
+    print(ctx.history[round_index][role_index])
     print("----->")
     print(log)
-    ctx.edit_history(log, idx[0], idx[1])
+    ctx.edit_history(log, round_index, role_index)
     return ctx.rh, *gr_hide()
 
 def gr_show_and_load(ctx, evt: gr.SelectData):
@@ -76,19 +86,21 @@ def gr_show_and_load(ctx, evt: gr.SelectData):
         label = f'修改提问内容{evt.index[0]}：'
     else:
         label = f'修改回答内容{evt.index[0]}：'
-    if options.cmd_opts.model is None or options.cmd_opts.model == "chatglm3":
-        return {'visible': True, '__type__': 'update'}, {'value': ctx.history[evt.index[0] * 2 + evt.index[1] + ctx.sysprompt_value]['content'], 'label': label, '__type__': 'update'}, evt.index
-    else:
-        return {'visible': True, '__type__': 'update'}, {'value': ctx.history[evt.index[0]][evt.index[1]], 'label': label, '__type__': 'update'}, evt.index
+    round_index, role_index = ctx.get_history(evt.index[0], evt.index[1])
+    return {'visible': True, '__type__': 'update'}, {'value': ctx.history[round_index][role_index], 'label': label, '__type__': 'update'}, evt.index
 
 def gr_hide():
     return {'visible': False, '__type__': 'update'}, {'value': '', 'label': '', '__type__': 'update'}, []
 
 def apply_max_round_click(ctx, max_round):
+    print('+' * 50)
+    print(f"设置最大对话轮数 {ctx.max_rounds} -> {max_round}")
     ctx.max_rounds = max_round
     return f"成功设置: 最大对话轮数 {ctx.max_rounds}"
 
 def apply_max_words_click(ctx, max_words):
+    print('+' * 50)
+    print(f"设置最大对话字数 {ctx.max_words} -> {max_words}")
     ctx.max_words = max_words
     return f"成功设置: 最大对话字数 {ctx.max_words}" 
 
@@ -96,33 +108,39 @@ def enable_system_prompt(ctx, value, prompt):
     if options.cmd_opts.model is None or options.cmd_opts.model == "chatglm3":
         if value == True:
             ctx.sysprompt_value = 1
-            if ctx.history == [] or ctx.history[0]['role'] != 'system':
+            if len(ctx.history) == 0 or ctx.history[0]['role'] != 'system':
                 ctx.history.insert(0, {'role': 'system', 'content': prompt})
             else:
                 ctx.history[0]['content'] = prompt
+            print('+' * 50)
+            print(f'System Prompt: {prompt}')
             return "系统(全局)提示词已启用", gr_show(), gr_show(), gr_show()
         else:
             ctx.sysprompt_value = 0
             new_prompt = prompt
-            if ctx.history != [] and ctx.history[0]['role'] == 'system':
+            if len(ctx.history) > 0 and ctx.history[0]['role'] == 'system':
                 new_prompt = ctx.history[0]['content']
                 ctx.history.pop(0)
+            print('+' * 50)
+            print(f'禁用 System Prompt: {new_prompt}')
             return "系统(全局)提示词已禁用", {'value': new_prompt, 'visible': False, '__type__': 'update'}, gr_show(False), gr_show(False)
     return "此模型暂不支持使用系统(全局)提示词", gr_show(False), gr_show(False), gr_show(False)
 
 def submit_system_prompt(ctx, prompt):
     if options.cmd_opts.model is None or options.cmd_opts.model == "chatglm3":
         ctx.sysprompt_value = 1
-        if ctx.history == [] or ctx.history[0]['role'] != 'system':
+        if len(ctx.history) == 0 or ctx.history[0]['role'] != 'system':
             ctx.history.insert(0, {'role': 'system', 'content': prompt})
         else:
             ctx.history[0]['content'] = prompt
+        print('+' * 50)
+        print(f'System Prompt: {prompt}')
         return "系统(全局)提示词已更新"
     return "此模型暂不支持使用系统(全局)提示词"
 
 def undo_system_prompt(ctx):
     if options.cmd_opts.model is None or options.cmd_opts.model == "chatglm3":
-        if ctx.history == [] or ctx.history[0]['role'] != 'system':
+        if len(ctx.history) == 0 or ctx.history[0]['role'] != 'system':
             return "你是ChatGLM3，由智谱AI训练的一个语言模型，请根据用户的指示正确的回答用户的问题。", "已恢复默认的系统(全局)提示词"
         else:
             return ctx.history[0]['content'], "已撤销对系统(全局)提示词的更改"
@@ -225,8 +243,8 @@ def create_ui():
             cmd_output
         ])
         
-        revoke_btn.click(lambda ctx: ctx.revoke(), inputs=[state], outputs=[chatbot])
-        clear_history_btn.click(clear_history, inputs=[state], outputs=[chatbot, cmd_output])
+        revoke_btn.click(revoke, inputs=[state], outputs=[chatbot, cmd_output, edit_log, log, log_idx])
+        clear_history_btn.click(clear_history, inputs=[state], outputs=[chatbot, cmd_output, edit_log, log, log_idx])
         stop_generate.click(lambda ctx: ctx.interrupt(), inputs=[state], outputs=[])
         clear_input.click(lambda x: "", inputs=[input_message], outputs=[input_message])
         save_his_btn.click(lambda ctx: ctx.save_history(), inputs=[state], outputs=[cmd_output])
@@ -243,6 +261,9 @@ def create_ui():
             setting_output = gr.Textbox(label="消息输出", interactive=False)
 
         with gr.Row():
+            disable_parse = gr.Checkbox(False, label="禁用字符转义")
+
+        with gr.Row():
             enable_sysprompt = gr.Checkbox(False, label="启动系统(全局)提示词")
         
         with gr.Row():
@@ -255,6 +276,13 @@ def create_ui():
         with gr.Row():
             reload_ui = gr.Button("重启 WebUI")
 
+        def disable_text_parse(ctx, value):
+            if value:
+                ctx.disable_parse = True
+                return "已禁用字符转义", ctx.sync_history()
+            ctx.disable_parse = False
+            return "已启用字符转义", ctx.sync_history()
+
         def restart_ui():
             options.need_restart = True
 
@@ -262,6 +290,7 @@ def create_ui():
         submit_sysprompt.click(submit_system_prompt, inputs=[state, system_prompt], outputs=[setting_output])
         undo_sysprompt.click(undo_system_prompt, inputs=[state], outputs=[system_prompt, setting_output])
         load_his_btn.upload(lambda ctx, f: ctx.load_history(f), inputs=[state, load_his_btn], outputs=[chatbot, enable_sysprompt, system_prompt])
+        disable_parse.change(disable_text_parse, inputs=[state, disable_parse], outputs=[setting_output, chatbot])
         reload_ui.click(restart_ui)
 
     interfaces = [

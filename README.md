@@ -41,11 +41,17 @@ python webui.py
 
 `--model-path`: specify model path. If this parameter is not specified manually, the default value is `THUDM/chatglm-6b`. Transformers will automatically download model from huggingface.
 
+`--model`: specify model version. chatglm3(default), chatglm2, chatglm
+
 `--listen`: launch gradio with 0.0.0.0 as server name, allowing to respond to network requests
+
+`--autolaunch`: open url in web browser after launching webui
 
 `--port`: webui port
 
 `--share`: use gradio to share
+
+`--device-id`: select the default CUDA device to use
 
 `--precision`: fp32(CPU only), fp16, int4(CUDA GPU only), int8(CUDA GPU only)
 

@@ -134,14 +134,20 @@ def infer(query, history,
                 temperature=temperature
             )
 
-            print(output, end='')
+            if cmd_opts.model is None or cmd_opts.model == "chatglm3":
+                if history[-2]['role'] == 'assistant':
+                    print(history[-2]['content'])
+                    print('=' * 50)
+                print(history[-1]['content'], end='')
+            else:
+                print(output, end='')
             yield query, output, history
 
     except Exception as e:
         print("")
         print('*' * 50)
         print(f"生成失败: {repr(e)}", end='')
-        traceback.print_exception(e)
+        traceback.print_exc()
 
     print()
     torch_gc()
