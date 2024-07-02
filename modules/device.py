@@ -28,4 +28,4 @@ def torch_gc():
 device = cpu if options.cmd_opts.cpu else get_optimal_device()
 
 if not cuda_available:
-    print("CUDA is not available, using cpu mode...")
+    print("无法使用显卡，转为使用 CPU 模式。")

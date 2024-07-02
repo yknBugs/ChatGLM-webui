@@ -44,7 +44,7 @@ def regenerate(ctx, max_length, top_p, temperature, use_stream_chat):
         raise RuntimeError("没有过去的对话")
     
     i = ctx.history.pop()
-    if options.cmd_opts.model is None or options.cmd_opts.model == "chatglm3":
+    if options.cmd_opts.model is None or options.cmd_opts.model == "chatglm3" or options.cmd_opts.model == "chatglm4":
         while ctx.history and ctx.history[-1]['role'] == 'assistant':
             i = ctx.history.pop()
         i = ctx.history.pop()
@@ -105,7 +105,7 @@ def apply_max_words_click(ctx, max_words):
     return f"成功设置: 最大对话字数 {ctx.max_words}" 
 
 def enable_system_prompt(ctx, value, prompt):
-    if options.cmd_opts.model is None or options.cmd_opts.model == "chatglm3":
+    if options.cmd_opts.model is None or options.cmd_opts.model == "chatglm3" or options.cmd_opts.model == "chatglm4":
         if value == True:
             ctx.sysprompt_value = 1
             if len(ctx.history) == 0 or ctx.history[0]['role'] != 'system':
@@ -127,7 +127,7 @@ def enable_system_prompt(ctx, value, prompt):
     return "此模型暂不支持使用系统(全局)提示词", gr_show(False), gr_show(False), gr_show(False)
 
 def submit_system_prompt(ctx, prompt):
-    if options.cmd_opts.model is None or options.cmd_opts.model == "chatglm3":
+    if options.cmd_opts.model is None or options.cmd_opts.model == "chatglm3" or options.cmd_opts.model == "chatglm4":
         ctx.sysprompt_value = 1
         if len(ctx.history) == 0 or ctx.history[0]['role'] != 'system':
             ctx.history.insert(0, {'role': 'system', 'content': prompt})
@@ -139,12 +139,12 @@ def submit_system_prompt(ctx, prompt):
     return "此模型暂不支持使用系统(全局)提示词"
 
 def undo_system_prompt(ctx):
-    if options.cmd_opts.model is None or options.cmd_opts.model == "chatglm3":
+    if options.cmd_opts.model is None or options.cmd_opts.model == "chatglm3" or options.cmd_opts.model == "chatglm4":
         if len(ctx.history) == 0 or ctx.history[0]['role'] != 'system':
-            return "你是ChatGLM3，由智谱AI训练的一个语言模型，请根据用户的指示正确的回答用户的问题。", "已恢复默认的系统(全局)提示词"
+            return "你是ChatGLM，由智谱AI训练的一个语言模型，请根据用户的指示正确的回答用户的问题。", "已恢复默认的系统(全局)提示词"
         else:
             return ctx.history[0]['content'], "已撤销对系统(全局)提示词的更改"
-    return "你是ChatGLM3，由智谱AI训练的一个语言模型，请根据用户的指示正确的回答用户的问题。", "此模型暂不支持使用系统(全局)提示词"
+    return "你是ChatGLM，由智谱AI训练的一个语言模型，请根据用户的指示正确的回答用户的问题。", "此模型暂不支持使用系统(全局)提示词"
 
 def create_ui():
     reload_javascript()
@@ -158,7 +158,7 @@ def create_ui():
                 with gr.Row():
                     with gr.Column(variant="panel"):
                         with gr.Row():
-                            max_length = gr.Slider(minimum=32, maximum=32768, step=32, label='Max Length', value=8192)
+                            max_length = gr.Slider(minimum=64, maximum=1048576, step=64, label='Max Length', value=16384)
                             top_p = gr.Slider(minimum=0.01, maximum=1.0, step=0.01, label='Top P', value=0.8)
                         with gr.Row():
                             temperature = gr.Slider(minimum=0.01, maximum=1.0, step=0.01, label='Temperature', value=0.95)
@@ -168,7 +168,7 @@ def create_ui():
                             apply_max_rounds = gr.Button("✔", elem_id="del-btn")
 
                         with gr.Row():
-                            max_words = gr.Slider(minimum=32, maximum=32768, step=32, label='最大对话字数', value=8192)
+                            max_words = gr.Slider(minimum=64, maximum=8388608, step=64, label='最大对话字数', value=32768)
                             apply_max_words = gr.Button("✔", elem_id="del-btn")
 
                         cmd_output = gr.Textbox(label="消息输出", interactive=False)
@@ -261,13 +261,13 @@ def create_ui():
             setting_output = gr.Textbox(label="消息输出", interactive=False)
 
         with gr.Row():
-            disable_parse = gr.Checkbox(False, label="禁用字符转义")
+            disable_parse = gr.Checkbox(True, label="禁用字符转义")
 
         with gr.Row():
             enable_sysprompt = gr.Checkbox(False, label="启动系统(全局)提示词")
         
         with gr.Row():
-            system_prompt = gr.Textbox(value="你是ChatGLM3，由智谱AI训练的一个语言模型，请根据用户的指示正确的回答用户的问题。", placeholder="输入系统(全局)提示词的内容", visible=False, show_label=False, lines=10, container=False)
+            system_prompt = gr.Textbox(value="你是ChatGLM，由智谱AI训练的一个语言模型，请根据用户的指示正确的回答用户的问题。", placeholder="输入系统(全局)提示词的内容", visible=False, show_label=False, lines=10, container=False)
         
         with gr.Row():
             submit_sysprompt = gr.Button("更新系统(全局)提示词", variant="primary", visible=False)
